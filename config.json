@@ -1,0 +1,9 @@
+{
+  "sources": {
+    "rgb_hls": "http://localhost:8888/drone/index.m3u8",
+    "thermal_hls": "http://localhost:8888/thermal/index.m3u8",
+    "thermal_mjpeg": "http://localhost:5000/stream.mjpg",
+    "test_hls": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+  },
+  "telemetry_ws": "ws://localhost:8765"
+}

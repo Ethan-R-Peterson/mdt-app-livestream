@@ -21,3 +21,27 @@ A placeholder `<div id="map">` and module hook will be provided so the map can m
 
 ## Notes
 - Styling intentionally minimal per request. Clean module boundaries to add features later.
+
+## ----------------------------------------------------------------------------------------------------------------------
+## Quick start
+# 1) Static server
+python -m http.server 8000
+# open http://localhost:8000
+
+# 2) Telemetry (optional)
+pip install websockets
+python telemetry_server.py
+# in UI, WS is auto-loaded from config.json
+
+# 3) Test HLS (optional)
+docker run --rm -it -p 8554:8554 -p 8888:8888 bluenviron/mediamtx:latest
+ffmpeg -re -stream_loop -1 -i sample.mp4 -c copy -f rtsp rtsp://localhost:8554/drone
+# UI -> Source: RGB (HLS)
+
+# 4) Thermal MJPEG dummy (optional)
+pip install flask opencv-python-headless numpy
+- or -
+conda install -c conda-forge flask opencv numpy
+python thermal_mjpeg_dummy.py
+# UI -> Source: Thermal (MJPEG)
+
