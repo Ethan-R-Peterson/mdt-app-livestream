@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Drone Live</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+</head>
+<body>
+  <h1>Drone Live</h1>
+
+  <!-- Video + overlay -->
+  <div id="video-wrap" style="position:relative; display:inline-block;">
+    <video id="video" playsinline autoplay muted controls style="width: 800px; background:#000;"></video>
+    <canvas id="overlay" width="800" height="450"
+            style="position:absolute; left:0; top:0; pointer-events:none;"></canvas>
+  </div>
+
+  <!-- Telemetry readout -->
+  <pre id="telemetry" style="border:1px solid #ccc; padding:8px; width:800px; height:140px; overflow:auto;"></pre>
+
+  <!-- Controls -->
+  <div style="margin:8px 0;">
+    <label>HLS URL:
+      <input id="hlsUrl" size="60" value="http://localhost:8888/drone/index.m3u8" />
+    </label>
+    <button id="playBtn">Play HLS</button>
+    <label style="margin-left:12px;">Telemetry WS:
+      <input id="wsUrl" size="40" value="ws://localhost:8765" />
+    </label>
+    <button id="wsBtn">Connect Telemetry</button>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <script>
+    // --- Core modules registry so you can add/remove features later ---
+    const App = {
+      modules: [],
+      register(mod) { this.modules.push(mod); },
+      start(ctx) { this.modules.forEach(m => m.init && m.init(ctx)); }
+    };
+
+    // --- Video module (HLS now; can add WebRTC later) ---
+    const VideoModule = {
+      init({ videoEl }) {
+        this.video = videoEl;
+        document.getElementById('playBtn').addEventListener('click', () => {
+          const url = document.getElementById('hlsUrl').value.trim();
+          this.playHls(url);
+        });
+      },
+      playHls(url) {
+        if (Hls.isSupported()) {
+          if (this.hls) { this.hls.destroy(); }
+          this.hls = new Hls({ liveSyncDurationCount: 2 }); // lower-latency-ish HLS
+          this.hls.loadSource(url);
+          this.hls.attachMedia(this.video);
+          this.hls.on(Hls.Events.MANIFEST_PARSED, () => this.video.play());
+        } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+          this.video.src = url; // Safari
+          this.video.play();
+        } else {
+          alert('HLS not supported in this browser.');
+        }
+      }
+    };
+
+    // --- Telemetry module (WebSocket) ---
+    const TelemetryModule = {
+      init({ telemetryEl, overlayCtx }) {
+        this.el = telemetryEl;
+        this.ctx = overlayCtx;
+        document.getElementById('wsBtn').addEventListener('click', () => {
+          const url = document.getElementById('wsUrl').value.trim();
+          this.connect(url);
+        });
+      },
+      connect(url) {
+        if (this.ws) { this.ws.close(); }
+        this.ws = new WebSocket(url);
+        this.ws.onopen = () => this.log('WS connected');
+        this.ws.onclose = () => this.log('WS closed');
+        this.ws.onerror = (e) => this.log('WS error: ' + e.message);
+        this.ws.onmessage = (msg) => {
+          try {
+            const data = JSON.parse(msg.data);
+            this.renderTelemetry(data);
+            this.renderOverlay(data);
+          } catch (e) {
+            this.log('Bad JSON: ' + msg.data);
+          }
+        };
+      },
+      log(text) {
+        this.el.textContent += text + '\n';
+        this.el.scrollTop = this.el.scrollHeight;
+      },
+      renderTelemetry(d) {
+        const lines = [
+          `time: ${d.time ?? ''}`,
+          `altitude: ${d.alt?.toFixed?.(2) ?? d.alt} m`,
+          `groundSpeed: ${d.gs?.toFixed?.(2) ?? d.gs} m/s`,
+          `battery: ${d.batt ?? ''}%`,
+          `lat: ${d.lat ?? ''}, lon: ${d.lon ?? ''}`,
+          `yaw: ${d.yaw ?? ''}°, pitch: ${d.pitch ?? ''}°, roll: ${d.roll ?? ''}`,
+          d.note ? `note: ${d.note}` : ''
+        ].filter(Boolean);
+        this.log(lines.join(' | '));
+      },
+      renderOverlay(d) {
+        // Example: draw detection boxes if provided
+        // d.dets = [{x:0.2,y:0.2,w:0.2,h:0.15,label:"car",conf:0.87}, ...]
+        const ctx = this.ctx;
+        const canvas = ctx.canvas;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!Array.isArray(d.dets)) return;
+        ctx.lineWidth = 2;
+        ctx.font = '14px monospace';
+        d.dets.forEach(box => {
+          const x = Math.round(box.x * canvas.width);
+          const y = Math.round(box.y * canvas.height);
+          const w = Math.round(box.w * canvas.width);
+          const h = Math.round(box.h * canvas.height);
+          ctx.strokeRect(x, y, w, h);
+          const label = `${box.label ?? 'obj'} ${Math.round((box.conf ?? 0)*100)}%`;
+          ctx.fillText(label, x+4, y+16);
+        });
+      }
+    };
+
+    // --- Boot ---
+    window.addEventListener('DOMContentLoaded', () => {
+      const videoEl = document.getElementById('video');
+      const overlayCtx = document.getElementById('overlay').getContext('2d');
+      const telemetryEl = document.getElementById('telemetry');
+
+      App.register(VideoModule);
+      App.register(TelemetryModule);
+      App.start({ videoEl, overlayCtx, telemetryEl });
+    });
+  </script>
+</body>
+</html>
