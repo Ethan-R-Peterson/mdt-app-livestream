@@ -23,7 +23,7 @@ A placeholder `<div id="map">` and module hook will be provided so the map can m
 - Styling intentionally minimal per request. Clean module boundaries to add features later.
 
 # Quick start
-# 1) Static server
+## 1) Static server
 python -m http.server 8000
 open http://localhost:8000
 
