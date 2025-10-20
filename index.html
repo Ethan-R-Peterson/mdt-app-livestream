@@ -4,12 +4,31 @@
   <meta charset="utf-8" />
   <title>MDT Livestream</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    /* simple, clean layout for the control bar */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      align-items: center;
+      justify-content: center;   /* center the whole row */
+      padding: 6px 8px;
+    }
+    .controls label { white-space: nowrap; }
+    .controls input[type="text"],
+    .controls input[type="url"] {
+      padding: 3px 6px;
+      width: 320px;
+      max-width: 42vw;
+    }
+    .controls button { padding: 3px 8px; }
+  </style>
 </head>
 <body>
   <h1>MDT Livestream MVP</h1>
 
-  <!-- Controls -->
-  <div style="margin:8px 0;">
+  <!-- Centered controls row -->
+  <div class="controls">
     <label>Source:
       <select id="sourceSel">
         <option value="rgb_hls">RGB (HLS)</option>
@@ -18,20 +37,21 @@
       </select>
     </label>
 
-    <label style="margin-left:12px;">Stream URL:
-      <input id="mediaUrl" size="50" placeholder="paste .m3u8 (HLS) or .mjpg (MJPEG)" autocomplete="off" />
+    <label>Stream URL:
+      <input id="mediaUrl" type="url" placeholder="paste .m3u8 (HLS) or .mjpg (MJPEG)" autocomplete="off" />
     </label>
     <button id="playBtn">Play</button>
     <button id="stopBtn">Stop</button>
 
-    <label style="margin-left:12px;">Telemetry WS:
-      <input id="wsUrl" size="35" placeholder="ws://localhost:8765" autocomplete="off" />
+    <label>Telemetry WS:
+      <input id="wsUrl" type="url" placeholder="ws://localhost:8765" autocomplete="off" />
     </label>
-    <button id="wsBtn">Connect Telemetry</button>
-    <label style="margin-left:8px; user-select:none;">
-      <input type="checkbox" id="autoWs" unchecked />
-      Auto-connect
-    </label>
+    <button id="wsBtn">Connect</button>
+    <button id="wsDisconnectBtn">Disconnect</button>
+    <button id="wsClearBtn">Clear</button>
+
+    <label><input type="checkbox" id="hideTelemetry" /> Hide telemetry</label>
+    <label><input type="checkbox" id="drawOverlay" checked /> Draw overlay</label>
   </div>
 
   <!-- Video (HLS/WebRTC later) + overlay -->
@@ -67,8 +87,7 @@
     // Config (loaded from config.json if present). Keep EMPTY by default.
     const cfg = { sources:{}, telemetry_ws:"" };
 
-    // OPTIONAL: allow only these hostnames for stream URLs (prevents random internet feeds)
-    // To allow any URL, set ALLOWLIST_HOSTS = [].
+    // OPTIONAL allowlist for stream URLs; set [] to allow any.
     const ALLOWLIST_HOSTS = ["localhost","127.0.0.1"];
 
     const els = {
@@ -82,13 +101,17 @@
       stopBtn: document.getElementById('stopBtn'),
       wsUrl: document.getElementById('wsUrl'),
       wsBtn: document.getElementById('wsBtn'),
-      autoWs: document.getElementById('autoWs'),
+      wsDisconnectBtn: document.getElementById('wsDisconnectBtn'),
+      wsClearBtn: document.getElementById('wsClearBtn'),
+      hideTelemetry: document.getElementById('hideTelemetry'),
+      drawOverlayChk: document.getElementById('drawOverlay'),
       mjpegWrap: document.getElementById('mjpeg-wrap'),
       mjpeg: document.getElementById('mjpeg'),
       videoWrap: document.getElementById('video-wrap'),
     };
 
-    let hls = null, ws = null, wsUrlCurrent = "", wsRetry = 0, wsRetryTimer = null;
+    let hls = null, ws = null;
+    let drawOverlayEnabled = true;
 
     // --- helpers ---
     function isAllowedUrl(u){
@@ -104,7 +127,7 @@
     }
     const fmt = x => (typeof x==='number' && x.toFixed) ? x.toFixed(2) : x;
 
-    // --- config loader (never auto-play video) ---
+    // --- config loader (never auto-play video / no auto-connect) ---
     async function loadConfig(){
       try{
         const r = await fetch('config.json', {cache:'no-store'});
@@ -112,7 +135,7 @@
         const j = await r.json();
         if (j && typeof j === 'object') {
           if (j.sources && typeof j.sources === 'object') cfg.sources = j.sources;
-          if (j.telemetry_ws) els.wsUrl.value = j.telemetry_ws;
+          if (j.telemetry_ws) els.wsUrl.value = j.telemetry_ws; // prefill only
         }
       }catch(e){
         console.warn('No config.json or invalid JSON; continuing with empty config.');
@@ -164,6 +187,11 @@
 
     // --- overlay drawing from telemetry dets[] ---
     function drawOverlay(d){
+      if (!drawOverlayEnabled) {
+        const ctx0 = els.overlayCtx, c0 = ctx0.canvas;
+        ctx0.clearRect(0,0,c0.width,c0.height);
+        return;
+      }
       const ctx = els.overlayCtx, c = ctx.canvas;
       ctx.clearRect(0,0,c.width,c.height);
       if (!Array.isArray(d?.dets)) return;
@@ -180,27 +208,15 @@
       });
     }
 
-    // --- telemetry websocket with auto-connect + reconnect backoff ---
-    function wsScheduleReconnect(){
-      if (!els.autoWs.checked || !wsUrlCurrent) return;
-      const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(wsRetry, 6))); // 1s..32s
-      clearTimeout(wsRetryTimer);
-      wsRetryTimer = setTimeout(()=>connectWs(wsUrlCurrent), delay);
-      wsRetry++;
-      log(`WS reconnect in ${Math.round(delay/1000)}s...`);
-    }
-
+    // --- telemetry websocket (manual connect / disconnect; no auto-connect/reconnect) ---
     function connectWs(url){
       if (!url) return alert('Enter WS URL (e.g., ws://localhost:8765)');
       try{ ws?.close(); }catch{}
-      wsUrlCurrent = url;
-      wsRetry = 0; clearTimeout(wsRetryTimer);
-
       ws = new WebSocket(url);
       log(`WS connecting: ${url}`);
-      ws.onopen  = ()=>{ log('WS connected'); wsRetry = 0; };
-      ws.onclose = ()=>{ log('WS closed'); wsScheduleReconnect(); };
-      ws.onerror = ()=>{ log('WS error'); /* onclose will handle reconnect */ };
+      ws.onopen  = ()=>{ log('WS connected'); };
+      ws.onclose = ()=>{ log('WS closed'); };
+      ws.onerror = ()=>{ log('WS error'); };
       ws.onmessage = (msg)=>{
         try{
           const d = JSON.parse(msg.data);
@@ -219,15 +235,17 @@
       };
     }
 
-    // --- UI events (video is always manual; telemetry can auto-connect) ---
+    function disconnectWs(){
+      try { ws?.close(); } catch {}
+      ws = null;
+      log('WS disconnected (manual)');
+    }
+
+    // --- UI events ---
     document.addEventListener('DOMContentLoaded', async () => {
-      await loadConfig(); // DOES NOT auto-play video
+      await loadConfig(); // no auto actions
 
-      // Seed WS URL if present; auto-connect if checkbox is on and a URL exists
-      if (cfg.telemetry_ws && !els.wsUrl.value) els.wsUrl.value = cfg.telemetry_ws;
-      if (els.autoWs.checked && els.wsUrl.value.trim()) connectWs(els.wsUrl.value.trim());
-
-      // Toggle elements when switching source, but do not play
+      // Source switch (no auto-play)
       els.srcSel.addEventListener('change', () => {
         const isMjpeg = els.srcSel.value.endsWith('mjpeg');
         els.videoWrap.style.display = isMjpeg ? 'none' : 'inline-block';
@@ -253,10 +271,28 @@
         connectWs(url);
       });
 
+      els.wsDisconnectBtn.addEventListener('click', disconnectWs);
+
+      els.wsClearBtn.addEventListener('click', () => {
+        els.telemetry.textContent = '';
+      });
+
+      els.hideTelemetry.addEventListener('change', () => {
+        els.telemetry.style.display = els.hideTelemetry.checked ? 'none' : 'block';
+      });
+
+      els.drawOverlayChk.addEventListener('change', () => {
+        drawOverlayEnabled = els.drawOverlayChk.checked;
+        if (!drawOverlayEnabled) {
+          const ctx = els.overlayCtx, c = ctx.canvas;
+          ctx.clearRect(0,0,c.width,c.height);
+        }
+      });
+
       // Initialize UI state
       els.srcSel.dispatchEvent(new Event('change'));
 
-      // Example: how Siddhant would listen to telemetry for the map
+      // Example: map can subscribe to telemetry
       Bus.on('telemetry', (d) => {
         // map.updatePose?.(d.lat, d.lon, d.yaw);
       });
