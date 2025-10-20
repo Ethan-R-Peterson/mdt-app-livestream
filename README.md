@@ -24,12 +24,12 @@ A placeholder `<div id="map">` and module hook will be provided so the map can m
 
 # Quick start
 ## 1) Static server
-- python -m http.server 8000
+- `python -m http.server 8000`
 - open http://localhost:8000
 
 ## 2) Telemetry (optional)
-- pip install websockets
-- python telemetry_server.py
+- `pip install websockets`
+- `python telemetry_server.py`
 - in UI, WS is auto-loaded from config.json
 
 ## 3) Test RGB HLS (optional)
@@ -41,7 +41,7 @@ A placeholder `<div id="map">` and module hook will be provided so the map can m
 - UI -> Source: Thermal (HLS)
 
 ## 5) Thermal MJPEG dummy (optional)
-- python -m pip install flask pillow numpy
-- python thermal_mjpeg_dummy.py
+- `python -m pip install flask pillow numpy`
+- `python thermal_mjpeg_dummy.py`
 - UI -> Source: Thermal (MJPEG)
 
