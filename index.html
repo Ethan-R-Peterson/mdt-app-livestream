@@ -15,20 +15,28 @@
         <option value="rgb_hls">RGB (HLS)</option>
         <option value="thermal_hls">Thermal (HLS)</option>
         <option value="thermal_mjpeg">Thermal (MJPEG)</option>
-        <option value="test_hls">Test (HLS)</option>
       </select>
     </label>
-    <button id="loadBtn">Load Source</button>
+
+    <label style="margin-left:12px;">Stream URL:
+      <input id="mediaUrl" size="50" placeholder="paste .m3u8 (HLS) or .mjpg (MJPEG)" autocomplete="off" />
+    </label>
+    <button id="playBtn">Play</button>
+    <button id="stopBtn">Stop</button>
 
     <label style="margin-left:12px;">Telemetry WS:
-      <input id="wsUrl" size="40" />
+      <input id="wsUrl" size="35" placeholder="ws://localhost:8765" autocomplete="off" />
     </label>
     <button id="wsBtn">Connect Telemetry</button>
+    <label style="margin-left:8px; user-select:none;">
+      <input type="checkbox" id="autoWs" unchecked />
+      Auto-connect
+    </label>
   </div>
 
   <!-- Video (HLS/WebRTC later) + overlay -->
   <div id="video-wrap" style="position:relative; display:inline-block;">
-    <video id="video" playsinline autoplay muted controls style="width: 800px; background:#000;"></video>
+    <video id="video" playsinline muted controls style="width: 800px; background:#000;"></video>
     <canvas id="overlay" width="800" height="450"
             style="position:absolute; left:0; top:0; pointer-events:none;"></canvas>
   </div>
@@ -46,66 +54,112 @@
     <span style="opacity:0.6;">Map placeholder — Siddhant mounts here</span>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+  <!-- Pin a specific HLS.js version for stability -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.15"></script>
   <script>
-    // --- light event bus so map/other modules can subscribe to telemetry ---
+    // --- lightweight event bus so other modules (map) can subscribe to telemetry ---
     const Bus = {
       subs: {},
       on(evt, fn){ (this.subs[evt] ??= []).push(fn); },
       emit(evt, data){ (this.subs[evt]||[]).forEach(fn=>fn(data)); }
     };
 
+    // Config (loaded from config.json if present). Keep EMPTY by default.
     const cfg = { sources:{}, telemetry_ws:"" };
+
+    // OPTIONAL: allow only these hostnames for stream URLs (prevents random internet feeds)
+    // To allow any URL, set ALLOWLIST_HOSTS = [].
+    const ALLOWLIST_HOSTS = ["localhost","127.0.0.1"];
+
     const els = {
       video: document.getElementById('video'),
       overlay: document.getElementById('overlay'),
       overlayCtx: document.getElementById('overlay').getContext('2d'),
       telemetry: document.getElementById('telemetry'),
       srcSel: document.getElementById('sourceSel'),
-      loadBtn: document.getElementById('loadBtn'),
+      mediaUrl: document.getElementById('mediaUrl'),
+      playBtn: document.getElementById('playBtn'),
+      stopBtn: document.getElementById('stopBtn'),
       wsUrl: document.getElementById('wsUrl'),
       wsBtn: document.getElementById('wsBtn'),
+      autoWs: document.getElementById('autoWs'),
       mjpegWrap: document.getElementById('mjpeg-wrap'),
       mjpeg: document.getElementById('mjpeg'),
       videoWrap: document.getElementById('video-wrap'),
     };
 
-    let hls = null, ws = null;
+    let hls = null, ws = null, wsUrlCurrent = "", wsRetry = 0, wsRetryTimer = null;
 
-    // --- config loader ---
+    // --- helpers ---
+    function isAllowedUrl(u){
+      try{
+        if(!u) return false;
+        const url = new URL(u);
+        return ALLOWLIST_HOSTS.length===0 || ALLOWLIST_HOSTS.includes(url.hostname);
+      }catch{ return false; }
+    }
+    function log(text){
+      els.telemetry.textContent += text + '\n';
+      els.telemetry.scrollTop = els.telemetry.scrollHeight;
+    }
+    const fmt = x => (typeof x==='number' && x.toFixed) ? x.toFixed(2) : x;
+
+    // --- config loader (never auto-play video) ---
     async function loadConfig(){
       try{
         const r = await fetch('config.json', {cache:'no-store'});
+        if(!r.ok) return;
         const j = await r.json();
-        Object.assign(cfg, j);
-        els.wsUrl.value = cfg.telemetry_ws || '';
+        if (j && typeof j === 'object') {
+          if (j.sources && typeof j.sources === 'object') cfg.sources = j.sources;
+          if (j.telemetry_ws) els.wsUrl.value = j.telemetry_ws;
+        }
       }catch(e){
-        console.warn('No config.json found or invalid JSON, using defaults');
+        console.warn('No config.json or invalid JSON; continuing with empty config.');
       }
     }
 
-    // --- video loaders ---
+    // --- hard stop: destroys players, clears sources, resets canvas ---
+    function stopPlayback(){
+      try{ hls?.destroy(); }catch{}
+      hls = null;
+      try{
+        els.video.pause();
+        els.video.removeAttribute('src');
+        els.video.load();
+      }catch{}
+      els.mjpeg.src = "";
+      const ctx = els.overlayCtx, c = ctx.canvas;
+      ctx.clearRect(0,0,c.width,c.height);
+    }
+
+    // --- HLS playback (manual only) ---
     function playHls(url){
+      if (!isAllowedUrl(url)) return alert('Invalid or blocked URL (check allowlist or paste a valid .m3u8).');
+      stopPlayback();
       els.mjpegWrap.style.display = 'none';
       els.videoWrap.style.display = 'inline-block';
-      if (hls){ hls.destroy(); hls = null; }
+
       if (Hls.isSupported()){
         hls = new Hls({ liveSyncDurationCount: 2 });
         hls.loadSource(url);
         hls.attachMedia(els.video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => els.video.play());
-      } else if (els.video.canPlayType('application/vnd.apple.mpegurl')){
-        els.video.src = url; // Safari
-        els.video.play();
+        hls.on(Hls.Events.MANIFEST_PARSED, () => els.video.play().catch(()=>{}));
+      } else if (els.video.canPlayType('application/vnd.apple.mpegurl')) {
+        els.video.src = url; // Safari native
+        els.video.play().catch(()=>{});
       } else {
         alert('HLS not supported in this browser.');
       }
     }
-    function showMjpeg(url){
-      if (hls){ hls.destroy(); hls = null; }
+
+    // --- MJPEG playback (manual only) ---
+    function playMjpeg(url){
+      if (!isAllowedUrl(url)) return alert('Invalid or blocked URL (check allowlist or paste a valid .mjpg).');
+      stopPlayback();
       els.videoWrap.style.display = 'none';
       els.mjpegWrap.style.display = 'block';
-      els.mjpeg.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now(); // bust cache
+      els.mjpeg.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
     }
 
     // --- overlay drawing from telemetry dets[] ---
@@ -126,19 +180,38 @@
       });
     }
 
-    // --- telemetry websocket ---
+    // --- telemetry websocket with auto-connect + reconnect backoff ---
+    function wsScheduleReconnect(){
+      if (!els.autoWs.checked || !wsUrlCurrent) return;
+      const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(wsRetry, 6))); // 1s..32s
+      clearTimeout(wsRetryTimer);
+      wsRetryTimer = setTimeout(()=>connectWs(wsUrlCurrent), delay);
+      wsRetry++;
+      log(`WS reconnect in ${Math.round(delay/1000)}s...`);
+    }
+
     function connectWs(url){
-      if (ws) ws.close();
+      if (!url) return alert('Enter WS URL (e.g., ws://localhost:8765)');
+      try{ ws?.close(); }catch{}
+      wsUrlCurrent = url;
+      wsRetry = 0; clearTimeout(wsRetryTimer);
+
       ws = new WebSocket(url);
       log(`WS connecting: ${url}`);
-      ws.onopen = ()=>log('WS connected');
-      ws.onclose = ()=>log('WS closed');
-      ws.onerror = (e)=>log('WS error');
+      ws.onopen  = ()=>{ log('WS connected'); wsRetry = 0; };
+      ws.onclose = ()=>{ log('WS closed'); wsScheduleReconnect(); };
+      ws.onerror = ()=>{ log('WS error'); /* onclose will handle reconnect */ };
       ws.onmessage = (msg)=>{
         try{
           const d = JSON.parse(msg.data);
-          Bus.emit('telemetry', d);   // let map subscribe later
-          renderTelemetry(d);
+          Bus.emit('telemetry', d);   // map or other modules can listen
+          log([
+            `t=${d.time ?? ''}`,
+            `lat=${d.lat ?? ''}, lon=${d.lon ?? ''}`,
+            `alt=${fmt(d.alt)} m, gs=${fmt(d.gs)} m/s`,
+            `batt=${d.batt ?? ''}%`,
+            `yaw=${d.yaw ?? ''}°, pitch=${d.pitch ?? ''}°, roll=${d.roll ?? ''}`
+          ].join(' | '));
           drawOverlay(d);
         }catch(e){
           log('Bad JSON: ' + msg.data);
@@ -146,49 +219,48 @@
       };
     }
 
-    function log(text){
-      els.telemetry.textContent += text + '\n';
-      els.telemetry.scrollTop = els.telemetry.scrollHeight;
-    }
+    // --- UI events (video is always manual; telemetry can auto-connect) ---
+    document.addEventListener('DOMContentLoaded', async () => {
+      await loadConfig(); // DOES NOT auto-play video
 
-    function renderTelemetry(d){
-      const lines = [
-        `t=${d.time ?? ''}`,
-        `lat=${d.lat ?? ''}, lon=${d.lon ?? ''}`,
-        `alt=${fmt(d.alt)} m, gs=${fmt(d.gs)} m/s`,
-        `batt=${d.batt ?? ''}%`,
-        `yaw=${d.yaw ?? ''}°, pitch=${d.pitch ?? ''}°, roll=${d.roll ?? ''}`
-      ].filter(Boolean);
-      log(lines.join(' | '));
-    }
-    const fmt = x => (typeof x==='number' && x.toFixed) ? x.toFixed(2) : x;
+      // Seed WS URL if present; auto-connect if checkbox is on and a URL exists
+      if (cfg.telemetry_ws && !els.wsUrl.value) els.wsUrl.value = cfg.telemetry_ws;
+      if (els.autoWs.checked && els.wsUrl.value.trim()) connectWs(els.wsUrl.value.trim());
 
-    // --- UI events ---
-    els.loadBtn.addEventListener('click', ()=>{
-      const key = els.srcSel.value;
-      const url = cfg.sources?.[key];
-      if (!url) return alert('No URL configured for '+key);
-      if (key.includes('mjpeg')) showMjpeg(url);
-      else playHls(url);
-    });
-    els.wsBtn.addEventListener('click', ()=>{
-      const url = els.wsUrl.value.trim();
-      if (!url) return alert('Enter WS URL');
-      connectWs(url);
-    });
-
-    // boot
-    (async function(){
-      await loadConfig();
-      // preload default
-      if (cfg.sources?.rgb_hls) playHls(cfg.sources.rgb_hls);
-      if (cfg.telemetry_ws) connectWs(cfg.telemetry_ws);
-
-      // Example of how Siddhant would subscribe:
-      Bus.on('telemetry', (d)=>{
-        // e.g., map.updatePose(d.lat, d.lon, d.yaw)
+      // Toggle elements when switching source, but do not play
+      els.srcSel.addEventListener('change', () => {
+        const isMjpeg = els.srcSel.value.endsWith('mjpeg');
+        els.videoWrap.style.display = isMjpeg ? 'none' : 'inline-block';
+        els.mjpegWrap.style.display = isMjpeg ? 'block' : 'none';
+        stopPlayback();
+        const key = els.srcSel.value;
+        const cfgUrl = (cfg.sources && cfg.sources[key]) || "";
+        els.mediaUrl.value = cfgUrl || "";
       });
-    })();
+
+      els.playBtn.addEventListener('click', () => {
+        const key = els.srcSel.value;
+        const url = (els.mediaUrl.value || "").trim();
+        if (!url) return alert('Paste a stream URL first.');
+        if (key.endsWith('mjpeg')) playMjpeg(url);
+        else playHls(url);
+      });
+
+      els.stopBtn.addEventListener('click', stopPlayback);
+
+      els.wsBtn.addEventListener('click', () => {
+        const url = (els.wsUrl.value || "").trim();
+        connectWs(url);
+      });
+
+      // Initialize UI state
+      els.srcSel.dispatchEvent(new Event('change'));
+
+      // Example: how Siddhant would listen to telemetry for the map
+      Bus.on('telemetry', (d) => {
+        // map.updatePose?.(d.lat, d.lon, d.yaw);
+      });
+    });
   </script>
 </body>
 </html>
