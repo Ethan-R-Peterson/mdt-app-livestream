@@ -2,8 +2,8 @@
   "sources": {
     "rgb_hls": "",
     "thermal_hls": "",
-    "thermal_mjpeg": "http://localhost:5001/stream.mjpg",
+    "thermal_mjpeg": "http://10.0.0.3:5001/stream.mjpg",
     "test_hls": ""
   },
-  "telemetry_ws": "ws://localhost:8765"
+  "telemetry_ws": "ws://10.0.0.3:8765"
 }
