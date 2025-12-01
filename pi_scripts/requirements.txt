@@ -1,0 +1,27 @@
+# Raspberry Pi Requirements
+# Install with: pip install -r requirements.txt
+
+# Web servers
+flask>=2.3.0
+websockets>=11.0
+
+# Image processing
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# Optional: For YOLOv5 detection (uncomment if using)
+# torch>=2.0.0
+# torchvision>=0.15.0
+# ultralytics>=8.0.0
+
+# Optional: For Lepton camera via PureThermal (uncomment if needed)
+# pyudev>=0.24.0
+
+# Optional: For GPS (uncomment if using)
+# gpsd-py3>=0.3.0
+# gps3>=0.33.3
+
+# Optional: For IMU sensors (uncomment if using)
+# adafruit-circuitpython-bno055>=5.4.0
+# adafruit-circuitpython-mpu6050>=1.1.0
