@@ -1,27 +1,67 @@
 # Raspberry Pi Setup Guide
 
-This folder contains scripts to run on your Raspberry Pi for streaming Lepton thermal camera feed and telemetry data to the web application.
+This folder contains scripts to run on your Raspberry Pi for streaming Lepton thermal camera feed with YOLO detection to the web application.
 
-## Overview
+## 🚀 Quick Start (Recommended)
 
-The Pi runs two servers:
-1. **MJPEG Stream Server** (`lepton_stream.py`) - Streams thermal camera video over HTTP
-2. **Telemetry WebSocket Server** (`telemetry_server_pi.py`) - Sends detection and sensor data over WebSocket
+**Use the all-in-one server that combines video streaming + detection + telemetry:**
 
-## Prerequisites
+```bash
+# Simple startup with your ONNX model
+./start_stream.sh best.onnx
+
+# Or with custom device and classes
+./start_stream.sh best.onnx 0 "person,car,dog"
+```
+
+That's it! Access the stream from your MacBook at `http://<pi-ip>:5001/stream.mjpg`
+
+---
+
+## 📁 Files in this Directory
+
+### **`stream_and_telemetry.py`** ⭐ MAIN SERVER
+All-in-one server that runs:
+- MJPEG video stream (port 5001)
+- WebSocket telemetry (port 8765)
+- YOLO detection on Lepton camera
+
+**Usage:**
+```bash
+python stream_and_telemetry.py --onnx best.onnx --dev 0 --classes "person"
+```
+
+### **`start_stream.sh`**
+Convenience wrapper script for quick startup with automatic IP display
+
+### **`connect_lepton.py`**
+Your original script - standalone YOLO detection with local display (no streaming, kept for reference)
+
+### **`requirements.txt`**
+Python dependencies
+
+### **`README.md`**
+This file - complete setup guide
+
+---
+
+## 📋 Prerequisites
 
 ### Hardware
-- Raspberry Pi (3/4/5 or Zero 2 W recommended)
-- FLIR Lepton thermal camera
-- Camera connected via PureThermal board or direct I2C/SPI
+- Raspberry Pi (tested on Pi 5, should work on 3/4/Zero 2 W)
+- FLIR Lepton 3.5 thermal camera
+- PureThermal 3 board (or compatible V4L2 interface)
 
 ### Software
 - Raspberry Pi OS (Bullseye or later)
 - Python 3.7+
+- Your trained YOLO model exported to ONNX format
 
-## Installation
+---
 
-### 1. Clone this repository on your Pi
+## 🔧 Installation
+
+### 1. Clone repository on your Pi
 
 ```bash
 cd ~
@@ -29,160 +69,86 @@ git clone <your-repo-url>
 cd App-LiveStream/pi_scripts
 ```
 
-### 2. Install Python dependencies
+### 2. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Find your Pi's IP address
+### 3. Get your Pi's IP address
 
 ```bash
 hostname -I
+# Example output: 192.168.1.100
 ```
 
-Note this IP address (e.g., `192.168.1.100`) - you'll need it to configure the MacBook.
+Save this IP - you'll need it for MacBook configuration!
 
-## Configuration
+---
 
-### Integrate with your Lepton camera code
+## 🎯 Running the Server
 
-#### Option A: Using PureThermal board (V4L2)
-
-Edit `lepton_stream.py`, replace `get_lepton_frame()`:
-
-```python
-# Initialize camera once at module level
-cap = cv2.VideoCapture('/dev/video0')
-cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)  # Get raw thermal data
-
-def get_lepton_frame():
-    ret, frame = cap.read()
-    if not ret:
-        return None
-
-    # Normalize thermal data to 0-255
-    normalized = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-
-    # Apply color map (optional, for visualization)
-    colored = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
-
-    # Resize to display size
-    resized = cv2.resize(colored, (800, 450), interpolation=cv2.INTER_NEAREST)
-
-    return resized
-```
-
-#### Option B: Using direct I2C/SPI (pylepton)
-
-```python
-from pylepton import Lepton
-
-lepton = Lepton()
-
-def get_lepton_frame():
-    frame = lepton.capture()
-
-    # Convert to 8-bit
-    normalized = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-    colored = cv2.applyColorMap(normalized, cv2.COLORMAP_JET)
-    resized = cv2.resize(colored, (800, 450), interpolation=cv2.INTER_NEAREST)
-
-    return resized
-```
-
-### Integrate with your detection model
-
-Edit `telemetry_server_pi.py`:
-
-1. **Update `get_detection_results()`** with your model inference code
-2. **Start a detection thread** that continuously updates `current_detections`
-
-Example with YOLOv5:
-
-```python
-import torch
-import cv2
-import threading
-
-# Load model
-model = torch.hub.load('ultralytics/yolov5', 'yolov5s')
-
-# Global state
-current_detections = []
-
-def detection_loop():
-    global current_detections
-
-    cap = cv2.VideoCapture('/dev/video0')
-
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            continue
-
-        # Run inference
-        results = model(frame)
-
-        # Parse detections
-        detections = []
-        img_h, img_w = frame.shape[:2]
-
-        for *box, conf, cls in results.xyxy[0]:
-            x1, y1, x2, y2 = box
-            detections.append({
-                "x": float((x1 + x2) / 2) / img_w,
-                "y": float((y1 + y2) / 2) / img_h,
-                "w": float(x2 - x1) / img_w,
-                "h": float(y2 - y1) / img_h,
-                "label": model.names[int(cls)],
-                "conf": float(conf)
-            })
-
-        current_detections = detections
-
-# Start detection thread
-threading.Thread(target=detection_loop, daemon=True).start()
-```
-
-## Running the Servers
-
-### Start MJPEG stream server
+### Method 1: Using startup script (easiest)
 
 ```bash
-python lepton_stream.py
+chmod +x start_stream.sh
+./start_stream.sh best.onnx
 ```
 
-This starts the video stream server on port **5001**.
-
-Test it: Open `http://<pi-ip>:5001/` in a browser on your MacBook.
-
-### Start telemetry WebSocket server
-
-In a separate terminal:
+### Method 2: Direct Python command
 
 ```bash
-python telemetry_server_pi.py
+python stream_and_telemetry.py \
+    --onnx best.onnx \
+    --dev 0 \
+    --classes "person" \
+    --imgsz 640 \
+    --conf 0.25 \
+    --nms 0.45
 ```
 
-This starts the telemetry server on port **8765**.
+### Command-line arguments:
+- `--onnx`: Path to your ONNX model (required)
+- `--dev`: Video device number (default: 0 = /dev/video0)
+- `--classes`: Comma-separated class names (e.g., "person,car,dog")
+- `--imgsz`: YOLO input size (default: 640)
+- `--conf`: Confidence threshold (default: 0.25)
+- `--nms`: NMS IoU threshold (default: 0.45)
 
-### Run both at startup (optional)
+---
 
-Create a systemd service or add to `/etc/rc.local`:
+## 🌐 Accessing the Stream
 
+Once running, you'll see output like:
+
+```
+🚀 Lepton Camera Stream + Telemetry Server
+================================================
+📹 Camera: /dev/video0
+🧠 ONNX Model: best.onnx
+🌐 MJPEG Stream:  http://0.0.0.0:5001/stream.mjpg
+📡 WebSocket:     ws://0.0.0.0:8765
+🧪 Test Page:     http://0.0.0.0:8765/
+================================================
+```
+
+### Test on Pi (optional):
 ```bash
-# Add to /etc/rc.local before 'exit 0'
-cd /home/pi/App-LiveStream/pi_scripts
-python lepton_stream.py &
-python telemetry_server_pi.py &
+# Test page with live video
+firefox http://localhost:5001/
 ```
 
-## MacBook Configuration
+### Access from MacBook:
+Use the Pi's IP address from step 3 above.
 
-On your MacBook, update the web app configuration:
+---
+
+## 💻 MacBook Configuration
+
+On your MacBook, navigate to the `App-LiveStream` directory and update:
 
 ### 1. Edit `config.json`
+Replace `192.168.1.100` with your Pi's IP:
 
 ```json
 {
@@ -196,36 +162,93 @@ On your MacBook, update the web app configuration:
 }
 ```
 
-Replace `192.168.1.100` with your Pi's actual IP!
-
-### 2. Edit `index.html` allowlist
-
-Find this line (~line 91):
-
-```javascript
-const ALLOWLIST_HOSTS = ["localhost","127.0.0.1"];
-```
-
-Update to:
+### 2. Edit `index.html`
+Find line ~91 and add your Pi's IP to the allowlist:
 
 ```javascript
 const ALLOWLIST_HOSTS = ["localhost","127.0.0.1","192.168.1.100"];
 ```
 
-Again, use your Pi's IP address.
-
 ### 3. Run the web app
 
 ```bash
 python -m http.server 8000
+# Open http://localhost:8000
 ```
 
-Open `http://localhost:8000` and:
-1. Select **"Thermal (MJPEG)"** source
-2. Click **"Play"**
-3. Click **"Connect Telemetry"**
+### 4. Use the web interface
 
-You should see the Lepton camera feed with detection boxes overlaid!
+1. Select source: **"Thermal (MJPEG)"**
+2. Click **"Play"** - you should see the Lepton camera feed with detection boxes!
+3. Click **"Connect Telemetry"** - detection boxes will now overlay on the video
+
+---
+
+## ✅ Verification
+
+### Test stream directly on Pi (optional)
+
+```bash
+# View test page
+firefox http://localhost:5001/
+
+# Or check if stream is working
+curl -I http://localhost:5001/stream.mjpg
+```
+
+### Test from MacBook
+
+```bash
+# Test MJPEG stream
+curl -I http://192.168.1.100:5001/stream.mjpg
+
+# Test WebSocket (requires wscat: npm install -g wscat)
+wscat -c ws://192.168.1.100:8765
+```
+
+---
+
+## 🔄 Auto-start on Boot (Optional)
+
+To start the server automatically when Pi boots:
+
+### Method 1: systemd service (recommended)
+
+Create `/etc/systemd/system/lepton-stream.service`:
+
+```ini
+[Unit]
+Description=Lepton Camera Stream Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/App-LiveStream/pi_scripts
+ExecStart=/usr/bin/python3 stream_and_telemetry.py --onnx /home/pi/best.onnx --classes person
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+```bash
+sudo systemctl enable lepton-stream
+sudo systemctl start lepton-stream
+sudo systemctl status lepton-stream
+```
+
+### Method 2: crontab
+
+```bash
+crontab -e
+# Add this line:
+@reboot cd /home/pi/App-LiveStream/pi_scripts && /usr/bin/python3 stream_and_telemetry.py --onnx /home/pi/best.onnx --classes person
+```
+
+---
 
 ## Troubleshooting
 

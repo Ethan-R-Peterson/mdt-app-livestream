@@ -17,8 +17,7 @@ See **[pi_scripts/README.md](pi_scripts/README.md)** for complete Pi setup instr
 # On your Raspberry Pi
 cd pi_scripts
 pip install -r requirements.txt
-python lepton_stream.py       # Terminal 1: Video stream
-python telemetry_server_pi.py  # Terminal 2: Telemetry/detection data
+./start_stream.sh best.onnx  # Single command runs everything!
 ```
 
 ## Using the Web App
@@ -69,15 +68,16 @@ const ALLOWLIST_HOSTS = ["localhost","127.0.0.1","192.168.1.100"];
 
 ```
 App-LiveStream/
-├── index.html                    # Web UI (MacBook)
-├── config.json                   # Stream URLs (MacBook)
-├── telemetry_server.py           # Test telemetry (MacBook - dummy data)
-├── thermal_mjpeg_dummy.py        # Test thermal stream (MacBook - dummy)
-└── pi_scripts/                   # Raspberry Pi code
-    ├── README.md                 # Pi setup guide ⭐
-    ├── requirements.txt          # Pi dependencies
-    ├── lepton_stream.py          # Real thermal camera stream
-    └── telemetry_server_pi.py    # Real telemetry/detection data
+├── index.html                       # Web UI (MacBook)
+├── config.json                      # Stream URLs (MacBook)
+├── telemetry_server.py              # Test telemetry (MacBook - dummy data)
+├── thermal_mjpeg_dummy.py           # Test thermal stream (MacBook - dummy)
+└── pi_scripts/                      # Raspberry Pi code
+    ├── README.md                    # Pi setup guide ⭐
+    ├── requirements.txt             # Pi dependencies
+    ├── stream_and_telemetry.py      # All-in-one server (stream + detection + telemetry)
+    ├── start_stream.sh              # Quick startup script
+    └── connect_lepton.py            # Original detection script (reference)
 ```
 
 ## Map Integration
@@ -118,10 +118,9 @@ python -m http.server 8000
 ### On Raspberry Pi:
 - [ ] Connect Lepton camera
 - [ ] Install dependencies: `pip install -r pi_scripts/requirements.txt`
-- [ ] Update camera code in `lepton_stream.py`
-- [ ] Update detection code in `telemetry_server_pi.py`
+- [ ] Copy your ONNX model to Pi
 - [ ] Get Pi IP address: `hostname -I`
-- [ ] Start servers: `python lepton_stream.py` & `python telemetry_server_pi.py`
+- [ ] Start server: `./start_stream.sh best.onnx`
 
 ### On MacBook:
 - [ ] Update `config.json` with Pi's IP
