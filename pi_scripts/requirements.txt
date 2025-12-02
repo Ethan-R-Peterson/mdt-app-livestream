@@ -12,8 +12,8 @@ Pillow>=10.0.0
 
 # Google Coral Edge TPU (for Coral-accelerated inference)
 # Install Edge TPU runtime first: https://coral.ai/docs/accelerator/get-started/
+# Note: tflite-runtime must be installed separately (see CORAL_SETUP.md)
 pycoral>=2.0.0
-tflite-runtime>=2.5.0
 
 # Optional: For YOLOv5 detection (uncomment if using)
 # torch>=2.0.0

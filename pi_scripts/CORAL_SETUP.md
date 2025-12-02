@@ -25,8 +25,26 @@ sudo apt-get install libedgetpu1-std
 
 ### **2. Install Python Libraries**
 
+**Option A: Install from Google's repository (Recommended)**
+
 ```bash
-pip3 install pycoral tflite-runtime
+# Install pycoral (includes tflite-runtime as dependency)
+pip3 install --extra-index-url https://google-coral.github.io/py-repo/ pycoral
+```
+
+**Option B: If above fails, install separately**
+
+```bash
+# For Python 3.9 on Raspberry Pi (adjust version as needed)
+pip3 install --extra-index-url https://google-coral.github.io/py-repo/ pycoral~=2.0
+pip3 install --extra-index-url https://google-coral.github.io/py-repo/ tflite-runtime
+```
+
+**Option C: For Raspberry Pi OS Bullseye or later**
+
+```bash
+# Use apt instead of pip
+sudo apt-get install python3-pycoral python3-tflite-runtime
 ```
 
 ### **3. Verify Coral Connection**
@@ -114,6 +132,28 @@ This creates `best_int8_edgetpu.tflite` ready for Coral.
 ---
 
 ## 🔍 **Troubleshooting**
+
+### **"No matching distribution found for tflite-runtime" error:**
+
+The `tflite-runtime` package is not available on PyPI for all platforms. Use one of these solutions:
+
+**Solution 1: Install from Google's Coral repository**
+```bash
+pip3 install --extra-index-url https://google-coral.github.io/py-repo/ pycoral tflite-runtime
+```
+
+**Solution 2: Use system packages (easiest)**
+```bash
+sudo apt-get install python3-pycoral python3-tflite-runtime
+```
+
+**Solution 3: Check your Python version**
+```bash
+python3 --version  # Should be 3.9, 3.10, or 3.11
+
+# If you have multiple Python versions, specify:
+python3.9 -m pip install --extra-index-url https://google-coral.github.io/py-repo/ pycoral
+```
 
 ### **Coral not detected:**
 ```bash
